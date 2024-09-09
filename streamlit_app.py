@@ -11,11 +11,31 @@ import logging
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 
-# Set NLTK data path and download data (as before)
-# ...
+# Set NLTK data path
+nltk_data_path = os.path.expanduser("~/nltk_data")
+if not os.path.exists(nltk_data_path):
+    os.makedirs(nltk_data_path)
+nltk.data.path.append(nltk_data_path)
 
-# Initialize session state (as before)
-# ...
+# Download necessary NLTK data
+@st.cache_resource
+def download_nltk_data():
+    nltk.download('punkt', quiet=True, download_dir=nltk_data_path)
+    nltk.download('stopwords', quiet=True, download_dir=nltk_data_path)
+
+download_nltk_data()
+
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
+# Set the path to the PDF folder
+PDF_FOLDER = "./pdf_catalogs"  # Update this path as needed
+
+# Initialize session state
+if 'furniture_database' not in st.session_state:
+    st.session_state.furniture_database = pd.DataFrame(columns=['name', 'type', 'description', 'sizes', 'finishes', 'price', 'pdf_name'])
+if 'pdf_contents' not in st.session_state:
+    st.session_state.pdf_contents = {}
 
 def parse_furniture_item(text):
     item = {
@@ -65,13 +85,66 @@ def process_pdf(pdf_name, content):
         st.error(f"Error processing PDF {pdf_name}. Please check the log for details.")
         return 0
 
-# Rest of the functions (read_pdf, match_brief) remain the same
-# ...
+def read_pdf(file_path):
+    with open(file_path, 'rb') as file:
+        pdf_reader = PyPDF2.PdfReader(file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+    return text
+
+def match_brief(brief):
+    if st.session_state.furniture_database.empty:
+        return []
+    
+    brief_processed = preprocess_text(brief)
+    st.session_state.furniture_database['processed_text'] = st.session_state.furniture_database.apply(
+        lambda row: preprocess_text(' '.join([str(row['name']), str(row['type']), str(row['description']), str(row['sizes']), str(row['finishes'])])),
+        axis=1
+    )
+    
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(st.session_state.furniture_database['processed_text'])
+    brief_vector = vectorizer.transform([brief_processed])
+    
+    cosine_similarities = cosine_similarity(brief_vector, tfidf_matrix).flatten()
+    
+    top_indices = cosine_similarities.argsort()[-5:][::-1]
+    results = st.session_state.furniture_database.iloc[top_indices]
+    
+    return results
+
+def preprocess_text(text):
+    stop_words = set(stopwords.words('english'))
+    word_tokens = word_tokenize(text.lower())
+    return ' '.join([w for w in word_tokens if w.isalnum() and w not in stop_words])
 
 st.title('Furniture Catalog Matcher')
 
-# PDF processing and matching logic (as before)
-# ...
+# Read PDFs from the folder
+pdf_files = [f for f in os.listdir(PDF_FOLDER) if f.endswith('.pdf')]
+
+# Display list of available PDFs
+st.subheader("Available Catalogs")
+for pdf_name in pdf_files:
+    st.write(f"- {pdf_name}")
+
+# Button to process all PDFs
+if st.button("Process All Catalogs"):
+    st.session_state.furniture_database = pd.DataFrame(columns=['name', 'type', 'description', 'sizes', 'finishes', 'price', 'pdf_name'])
+    st.session_state.pdf_contents = {}
+    total_items = 0
+    for pdf_name in pdf_files:
+        file_path = os.path.join(PDF_FOLDER, pdf_name)
+        content = read_pdf(file_path)
+        st.session_state.pdf_contents[pdf_name] = content
+        items_processed = process_pdf(pdf_name, content)
+        total_items += items_processed
+        st.success(f"Processed {pdf_name}. Items added: {items_processed}")
+    st.success(f"Total items in database: {total_items}")
+
+# Text area for client brief
+client_brief = st.text_area("Enter client brief:")
 
 if st.button("Find Matches"):
     if st.session_state.furniture_database.empty:
@@ -88,5 +161,25 @@ if st.button("Find Matches"):
                     st.markdown(f"**{field.capitalize()}:** {row[field]}")
             st.markdown("---")
 
-# Rest of the Streamlit UI code (as before)
-# ...
+# Display database stats
+if not st.session_state.furniture_database.empty:
+    st.sidebar.subheader("Database Stats")
+    st.sidebar.text(f"Total items: {len(st.session_state.furniture_database)}")
+    st.sidebar.text(f"Catalogs processed: {len(st.session_state.pdf_contents)}")
+
+# Option to clear the database
+if st.sidebar.button("Clear Database"):
+    st.session_state.furniture_database = pd.DataFrame(columns=['name', 'type', 'description', 'sizes', 'finishes', 'price', 'pdf_name'])
+    st.session_state.pdf_contents = {}
+    st.sidebar.success("Database cleared.")
+
+# Display the full database
+if not st.session_state.furniture_database.empty:
+    if st.checkbox("Show full database"):
+        st.dataframe(st.session_state.furniture_database)
+
+# Option to view raw PDF content
+if st.session_state.pdf_contents:
+    pdf_to_view = st.selectbox("Select a catalog to view its content:", list(st.session_state.pdf_contents.keys()))
+    if st.button("View Catalog Content"):
+        st.text_area("Catalog Content:", st.session_state.pdf_contents[pdf_to_view], height=300)
