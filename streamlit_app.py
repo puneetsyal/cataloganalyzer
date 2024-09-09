@@ -1,16 +1,19 @@
 import streamlit as st
-import PyPDF2
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-import io
+import os
+import PyPDF2
 
 # Download necessary NLTK data
 nltk.download('punkt', quiet=True)
 nltk.download('stopwords', quiet=True)
+
+# Set the path to the PDF folder
+PDF_FOLDER = "./pdf_catalogs"  # Update this path as needed
 
 # Initialize session state
 if 'furniture_database' not in st.session_state:
@@ -23,33 +26,31 @@ def preprocess_text(text):
     word_tokens = word_tokenize(text.lower())
     return ' '.join([w for w in word_tokens if w.isalnum() and w not in stop_words])
 
-def process_pdf(file):
-    try:
-        pdf_content = file.read()
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_content))
+def read_pdf(file_path):
+    with open(file_path, 'rb') as file:
+        pdf_reader = PyPDF2.PdfReader(file)
         text = ""
         for page in pdf_reader.pages:
             text += page.extract_text()
-        
-        # Store PDF content in session state
-        st.session_state.pdf_contents[file.name] = text
-        
+    return text
+
+def process_pdf(pdf_name, content):
+    try:
         # Simple parsing (you'd want to make this more robust)
-        items = text.split('\n\n')
+        items = content.split('\n\n')
         new_rows = []
         for item in items:
             if len(item.strip()) > 0:
-                # Assume first line is item name, rest is description
                 lines = item.split('\n', 1)
                 item_name = lines[0].strip()
                 description = lines[1].strip() if len(lines) > 1 else ""
-                new_rows.append({'item': item_name, 'description': description, 'pdf_name': file.name})
+                new_rows.append({'item': item_name, 'description': description, 'pdf_name': pdf_name})
         
         new_df = pd.DataFrame(new_rows)
         st.session_state.furniture_database = pd.concat([st.session_state.furniture_database, new_df], ignore_index=True)
         return len(items)
     except Exception as e:
-        st.error(f"Error processing PDF: {str(e)}")
+        st.error(f"Error processing PDF {pdf_name}: {str(e)}")
         return 0
 
 def match_brief(brief):
@@ -72,25 +73,34 @@ def match_brief(brief):
 
 st.title('Furniture Catalog Matcher')
 
-# File uploader for PDFs
-uploaded_files = st.file_uploader("Choose PDF catalog files", accept_multiple_files=True, type="pdf")
-if uploaded_files:
+# Read PDFs from the folder
+pdf_files = [f for f in os.listdir(PDF_FOLDER) if f.endswith('.pdf')]
+
+# Display list of available PDFs
+st.subheader("Available Catalogs")
+for pdf_name in pdf_files:
+    st.write(f"- {pdf_name}")
+
+# Button to process all PDFs
+if st.button("Process All Catalogs"):
+    st.session_state.furniture_database = pd.DataFrame(columns=['item', 'description', 'pdf_name'])
+    st.session_state.pdf_contents = {}
     total_items = 0
-    for file in uploaded_files:
-        if file.name not in st.session_state.pdf_contents:
-            items_processed = process_pdf(file)
-            total_items += items_processed
-            st.success(f"Processed {file.name}. Items added: {items_processed}")
-        else:
-            st.info(f"{file.name} already processed. Skipping.")
-    st.success(f"Total items in database: {len(st.session_state.furniture_database)}")
+    for pdf_name in pdf_files:
+        file_path = os.path.join(PDF_FOLDER, pdf_name)
+        content = read_pdf(file_path)
+        st.session_state.pdf_contents[pdf_name] = content
+        items_processed = process_pdf(pdf_name, content)
+        total_items += items_processed
+        st.success(f"Processed {pdf_name}. Items added: {items_processed}")
+    st.success(f"Total items in database: {total_items}")
 
 # Text area for client brief
 client_brief = st.text_area("Enter client brief:")
 
 if st.button("Find Matches"):
     if st.session_state.furniture_database.empty:
-        st.error("Please upload PDF catalogs first.")
+        st.error("Please process the catalogs first.")
     elif not client_brief:
         st.error("Please enter a client brief.")
     else:
@@ -105,7 +115,7 @@ if st.button("Find Matches"):
 if not st.session_state.furniture_database.empty:
     st.sidebar.subheader("Database Stats")
     st.sidebar.text(f"Total items: {len(st.session_state.furniture_database)}")
-    st.sidebar.text(f"PDFs processed: {len(st.session_state.pdf_contents)}")
+    st.sidebar.text(f"Catalogs processed: {len(st.session_state.pdf_contents)}")
 
 # Option to clear the database
 if st.sidebar.button("Clear Database"):
@@ -120,6 +130,6 @@ if not st.session_state.furniture_database.empty:
 
 # Option to view raw PDF content
 if st.session_state.pdf_contents:
-    pdf_to_view = st.selectbox("Select a PDF to view its content:", list(st.session_state.pdf_contents.keys()))
-    if st.button("View PDF Content"):
-        st.text_area("PDF Content:", st.session_state.pdf_contents[pdf_to_view], height=300)
+    pdf_to_view = st.selectbox("Select a catalog to view its content:", list(st.session_state.pdf_contents.keys()))
+    if st.button("View Catalog Content"):
+        st.text_area("Catalog Content:", st.session_state.pdf_contents[pdf_to_view], height=300)
