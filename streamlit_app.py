@@ -119,7 +119,7 @@ def preprocess_text(text):
     word_tokens = word_tokenize(text.lower())
     return ' '.join([w for w in word_tokens if w.isalnum() and w not in stop_words])
 
-st.title('Furniture Catalog Matcher')
+st.title('Furniture Catalog Matcherator')
 
 # Read PDFs from the folder
 pdf_files = [f for f in os.listdir(PDF_FOLDER) if f.endswith('.pdf')]
