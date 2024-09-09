@@ -3,14 +3,19 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 import os
 import PyPDF2
 
 # Download necessary NLTK data
-nltk.download('punkt', quiet=True)
-nltk.download('stopwords', quiet=True)
+@st.cache_resource
+def download_nltk_data():
+    nltk.download('punkt', quiet=True)
+    nltk.download('stopwords', quiet=True)
+
+download_nltk_data()
+
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
 
 # Set the path to the PDF folder
 PDF_FOLDER = "./pdf_catalogs"  # Update this path as needed
